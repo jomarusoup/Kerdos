@@ -63,7 +63,10 @@ def ai_trading():
     upbit = pyupbit.Upbit(access, secret)
 
     print("### Chatgpt Decision: ", result['decision'].upper(), "###")
-    print("### Chatgpt Reason: ", result['reason'], "###")
+    if 'reason' in result:
+        print("### Chatgpt Reason: ", result['reason'], "###")
+    else:
+        print("### HOLD: No reason provided by ChatGPT ###")
 
     # Chatgpt 판단에 따라 매매 진행 시장가 매도/매수 주문
     if result['decision'] == 'buy':    # 매수
@@ -71,24 +74,21 @@ def ai_trading():
         if my_krw > 5000:
             print("### Buy Order Executed ###")
             print(upbit.buy_market_order("KRW-ETH", my_krw * 0.9995)) # 수수료 0.05% 적용
-            print("buy", result['reason'])
         else:
             print("잔액이 부족합니다.(KRW 5000원 이상 보유 필요)")
     elif result['decision'] == 'sell': # 매도
         my_eth = upbit.get_balance("KRW-ETH")
-        current_price = pyupbit.get_current_price(ticker="KRW-ETH")['orderbook_units'][0]['ask_price'] # 매도 1호가 기준으로 현재가격 측정
+        current_price = pyupbit.get_orderbook(ticker="KRW-ETH")['orderbook_units'][0]["ask_price"] # 매도 1호가 기준으로 현재가격 측정
         if my_eth * current_price > 5000:
             print("### Sell Order Executed ###")
             print(upbit.sell_market_order("KRW-ETH", my_eth))
-            print("sell", result['reason'])
         else:
             print("매도 주문 잔액이 부족합니다.(ETH 5000원 이상 보유 필요)")
     elif result['decision'] == 'hold': # hold
         print("### Hold Order Executed ###")
-        print("hold", result['reason'])
 
 #---------------------------------------------------
-# 4. 매매 주기 설정
+# 4. 매매 실행 주기 설정
 #---------------------------------------------------
 while True:
     import time
