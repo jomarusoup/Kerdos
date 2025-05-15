@@ -134,7 +134,7 @@ def ai_trading():
         "orderbook": orderbook,
         "investment_status": filtered_balance
     }
-    data_for_gpt_json = json.dumps(data_for_gpt, ensure_ascii=False)
+    data_for_gpt_json = json.dumps(data_for_gpt, ensure_ascii=False, default=str)
 
     #====================================================================
     # 4. ChatGPT API 콜 (gpt-4o, etc.)
@@ -216,6 +216,16 @@ def ai_trading():
 
     elif decision == "sell":
         orderbook_now = pyupbit.get_orderbook("KRW-ETH")
+
+        # 방어 코드 추가
+        if not orderbook_now or not isinstance(orderbook_now, list) or len(orderbook_now) == 0:
+            print("오더북 데이터를 불러오지 못했습니다. 매도를 중단합니다.")
+            return
+
+        if "orderbook_units" not in orderbook_now[0] or len(orderbook_now[0]["orderbook_units"]) == 0:
+            print("오더북에 주문 단위 정보가 없습니다. 매도를 중단합니다.")
+            return
+
         current_price = orderbook_now[0]["orderbook_units"][0]["ask_price"]
         total_value = my_eth * current_price
         if total_value > 5000:
