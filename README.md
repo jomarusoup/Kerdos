@@ -24,7 +24,7 @@ LMM Large Multimodel Models
 	- 추가 기능
 		- 엔벨로프 /
 
-![[Screenshot 2025-01-25 at 13.35.10.png]]
+<img width="934" alt="Screenshot 2025-01-25 at 13 35 10" src="https://github.com/user-attachments/assets/3397ba17-1e49-4b3d-a569-a60225608cc4" />
 
 ### 서버
 
