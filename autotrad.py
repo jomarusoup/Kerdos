@@ -27,10 +27,9 @@ def add_indicators(df, envelope_window=20, envelope_pct=0.02):
     indicator_macd   = None
 
     #--- Bollinger Bands
-    indicator_bbands = ta.volatility.BollingerBands
-    (
-        close      = df['Close'],
-        window     = 20,
+    indicator_bbands = ta.volatility.BollingerBands(
+        close = df['Close'],
+        window = 20,
         window_dev = 2
     )
 
@@ -39,16 +38,14 @@ def add_indicators(df, envelope_window=20, envelope_pct=0.02):
     df['bb_bbl'] = indicator_bbands.bollinger_lband() # 하단선
 
     #---- RSI
-    df['rsi'] = ta.momentum.RSIIndicator
-    (
-        close  = df['Close'],
+    df['rsi'] = ta.momentum.RSIIndicator(
+        close = df['Close'],
         window = 14
     ).rsi()
 
     #--- MACD
-    indicator_macd = ta.trend.MACD
-    (
-        close       = df['Close'],
+    indicator_macd = ta.trend.MACD(
+        close = df['Close'],
         window_slow = 26,
         window_fast = 12,
         window_sign = 9
@@ -59,15 +56,13 @@ def add_indicators(df, envelope_window=20, envelope_pct=0.02):
     df['macd_diff']   = indicator_macd.macd_diff()
 
     #--- SMA, EMA
-    df['sma_20'] = ta.trend.SMAIndicator
-    (
-        close  = df['Close'],
+    df['sma_20'] = ta.trend.SMAIndicator(
+        close = df['Close'],
         window = 20
     ).sma_indicator()
 
-    df['ema_12'] = ta.trend.EMAIndicator 
-    (
-        close  = df['Close'],
+    df['ema_12'] = ta.trend.EMAIndicator(
+        close = df['Close'],
         window = 12
     ).ema_indicator()
 
@@ -102,16 +97,14 @@ def get_fear_greed_index():
         data      = response.json()
         fng_entry = data['data'][0]
 
-        return
-        {
+        return {
             'value': int(fng_entry['value']),
             'classification': fng_entry['value_classification']
         }
 
     except Exception as e:
         print("[FNG] API Error:", e)
-        return
-        {
+        return {
             'value': 50,
             'classification': 'Neutral'
         }
@@ -121,28 +114,28 @@ def get_fear_greed_index():
 ##############################
 def ai_trading():
     #--- 변수 선언
-    access            = None
-    secret            = None
-    upbit             = None
-    all_balance       = None
-    filtered_balance  = None
-    df_30d            = None
-    df_24h            = None
-    orderbook         = None
-    fng               = None
-    data_for_gpt_json = None
-    system_prompt     = None
-    client            = None
-    response          = None
-    gpt_result_str    = None
-    gpt_result        = None
-    my_krw            = None
-    my_eth            = None
-    decision          = None
-    reason            = None
-    orderbook_now     = None
-    current_price     = None
-    total_value       = None
+    access            = None  # 업비트 API 액세스 키
+    secret            = None  # 업비트 API 시크릿 키
+    upbit             = None  # pyupbit.Upbit 객체 (API 연결)
+    all_balance       = None  # 전체 잔고 정보 (모든 코인)
+    filtered_balance  = None  # KRW, ETH만 필터링한 잔고 정보
+    df_30d            = None  # 30일치 일봉 데이터프레임
+    df_24h            = None  # 24시간치 1시간봉 데이터프레임
+    orderbook         = None  # 현재 오더북 정보
+    fng               = None  # 공포·탐욕 지수 정보
+    data_for_gpt_json = None  # ChatGPT에 전달할 데이터(JSON)
+    system_prompt     = None  # ChatGPT 시스템 프롬프트
+    client            = None  # OpenAI API 클라이언트 객체
+    response          = None  # ChatGPT API 응답 객체
+    gpt_result_str    = None  # ChatGPT 응답(문자열)
+    gpt_result        = None  # ChatGPT 응답(JSON 파싱 결과)
+    my_krw            = None  # 내 KRW(원화) 잔고
+    my_eth            = None  # 내 ETH(이더리움) 잔고
+    decision          = None  # ChatGPT의 매매 결정값
+    reason            = None  # ChatGPT의 매매 결정 사유
+    orderbook_now     = None  # 실시간 오더북 정보(매도 시)
+    current_price     = None  # 현재가(매도 시)
+    total_value       = None  # ETH 총 평가금액(매도 시)
 
     #--- .env 파일에서 환경변수 로드
     load_dotenv()
@@ -260,11 +253,11 @@ def ai_trading():
                 "role": "system",
                 "content": [
                     {
-                        "type": "text"
+                        "type": "text",
                         "text": system_prompt
                     }
                 ]
-            }
+            },
             # User
             {
                 "role": "user",
