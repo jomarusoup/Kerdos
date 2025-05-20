@@ -184,18 +184,6 @@ def ai_trading():
     #====================================================================
     # 4. ChatGPT에게 전달할 데이터 준비 (JSON)
     #====================================================================
-    data_for_gpt_json = json.dumps(
-        {
-            "chart_data_30d":    df_30d.to_dict(),
-            "chart_data_24h":    df_24h.to_dict(),
-            "orderbook":         orderbook,
-            "investment_status": filtered_balance,
-            "fear_greed":        fng
-        },
-        ensure_ascii=False,
-        default=str
-    )
-
     # 시스템 프롬프트 설정
     system_prompt = (
         "You are an Ethereum trading expert with deep experience in technical analysis, on-chain metrics, and market sentiment.\n"
@@ -222,6 +210,17 @@ def ai_trading():
         "{\"decision\":\"hold\",\"reason\":\"some technical reason\"}"
     )
 
+    data_for_gpt_json = json.dumps(
+        {
+            "chart_data_30d":    df_30d.to_dict(),
+            "chart_data_24h":    df_24h.to_dict(),
+            "orderbook":         orderbook,
+            "investment_status": filtered_balance,
+            "fear_greed":        fng
+        },
+        ensure_ascii=False,
+        default=str
+    )
     #====================================================================
     # 5. ChatGPT API 콜 (gpt-4o, etc.)
     #====================================================================
