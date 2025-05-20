@@ -113,7 +113,7 @@ def get_fear_greed_index():
 # 3) 메인 자동매매 함수
 ##############################
 def ai_trading():
-    #--- 변수 선언
+    #--- 변수 초기화
     access            = None  # 업비트 API 액세스 키
     secret            = None  # 업비트 API 시크릿 키
     upbit             = None  # pyupbit.Upbit 객체 (API 연결)
@@ -143,6 +143,8 @@ def ai_trading():
     #--- 업비트 로그인
     access = os.getenv("UPBIT_ACCESS_KEY")
     secret = os.getenv("UPBIT_SECRET_KEY")
+    if not access or not secret:
+        raise RuntimeError("UPBIT_ACCESS_KEY/SECRET not set")
     upbit  = pyupbit.Upbit(access, secret)
 
     #--- 현재 잔고 조회 (KRW, ETH만 필터)
@@ -241,6 +243,7 @@ def ai_trading():
         ensure_ascii=False,
         default=str
     )
+
     #====================================================================
     # 5. ChatGPT API 콜 (gpt-4o, etc.)
     #====================================================================
@@ -248,26 +251,8 @@ def ai_trading():
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            # System
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": system_prompt
-                    }
-                ]
-            },
-            # User
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": data_for_gpt_json
-                    }
-                ]
-            }
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": data_for_gpt_json}
         ],
         response_format={"type": "json_object"}
     )
