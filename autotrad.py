@@ -9,9 +9,9 @@ import ta
 from dotenv import load_dotenv
 from openai import OpenAI
 
-##############################
+########################################################
 # 1) 보조지표 계산 함수
-##############################
+########################################################
 def add_indicators(df, envelope_window=20, envelope_pct=0.02):
     """
     주어진 DataFrame(df)에
@@ -75,9 +75,13 @@ def add_indicators(df, envelope_window=20, envelope_pct=0.02):
 
     return df
 
-##############################
-# 2) 공포·탐욕 지수 호출 함수
-##############################
+########################################################
+# 2) 외부 데이터 수집 함수
+########################################################
+
+#========================================================
+# 2-1) 공포·탐욕 지수 호출 함수
+#========================================================
 def get_fear_greed_index():
 
     #--- 변수 선언
@@ -109,9 +113,54 @@ def get_fear_greed_index():
             'classification': 'Neutral'
         }
 
-##############################
+#========================================================
+# 2-2) Google News 최신 뉴스 헤드라인 수집 함수 (SerpAPI)
+#========================================================
+def get_latest_eth_news_headlines():
+    """
+    SerpAPI를 활용해 Google News에서 'Ethereum' 관련 최신 뉴스 헤드라인 5개를 가져온다.
+    쿼터 초과 등으로 뉴스가 없을 경우 빈 리스트 반환.
+    """
+    api_key = os.getenv("SERPAPI_KEY")
+    if not api_key:
+        print("[NEWS] SERPAPI_KEY가 설정되어 있지 않습니다.")
+        return []
+
+    # request를 이용해서 GET요청으로 api요청
+    url = "https://serpapi.com/search.json"
+    params = {
+        "engine": "google_news",
+        "q": "ethereum OR 이더리움",
+        "gl": "kr",
+        "hl": "ko",
+        "api_key": api_key
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if "error" in data:
+            print(f"[NEWS] SerpAPI Error: {data['error']}")
+            return []
+        news_results = data.get("news_results", [])
+
+        # 헤드라인 5개만 추출 (title, date만)
+        headlines = [
+            {
+                "title": item.get("title"),
+                "date": item.get("date")
+            }
+            for item in news_results[:5]
+        ]
+        return headlines
+    except Exception as e:
+        print("[NEWS] SerpAPI Exception:", e)
+        return []
+
+########################################################
 # 3) 메인 자동매매 함수
-##############################
+########################################################
 def ai_trading():
     #--- 변수 초기화
     access            = None  # 업비트 API 액세스 키
@@ -199,9 +248,14 @@ def ai_trading():
     df_24h = add_indicators(df_24h)
 
     #====================================================================
-    # 3. 공포·탐욕 지수 수집
+    # 3-1. 공포·탐욕 지수 수집
     #====================================================================
     fng = get_fear_greed_index()
+
+    #====================================================================
+    # 3-2. 최신 이더리움 뉴스 헤드라인 수집
+    #====================================================================
+    eth_news_headlines = get_latest_eth_news_headlines()
 
     #====================================================================
     # 4. ChatGPT에게 전달할 데이터 준비 (JSON)
@@ -215,16 +269,19 @@ def ai_trading():
         "- Current ETH orderbook snapshot\n"
         "- Account balances (e.g., KRW, ETH)\n"
         "- Fear & Greed Index { \"value\": int, \"classification\": string }\n"
+        "- Latest Ethereum-related news headlines (list of title, snippet, source, date)\n"
         "- Estimated trading fees (in %) and maximum risk per trade (in % of account)\n\n"
         "Your task:\n"
         "1. Analyze technical indicators (e.g., MACD, RSI, Bollinger Bands) on both timeframes.\n"
         "2. Incorporate Fear & Greed Index as an additional risk-sentiment signal:\n"
         "   - Extreme Fear → consider contrarian buys  \n"
         "   - Extreme Greed → consider profit-taking or avoid new longs\n"
-        "3. Calculate an optimal position size based on maximum risk per trade.\n"
-        "4. Recommend stop-loss and take-profit levels if appropriate.\n"
-        "5. Decide whether to BUY, SELL, or HOLD ETH at market.\n"
-        "6. Assign a confidence score between 0.0 and 1.0.\n\n"
+        "3. Consider the latest news headlines for any major events or sentiment that could affect ETH price (e.g., regulations, hacks, ETF news, etc).\n"
+        "   - If no news is provided, ignore this factor and focus on other data.\n"
+        "4. Calculate an optimal position size based on maximum risk per trade.\n"
+        "5. Recommend stop-loss and take-profit levels if appropriate.\n"
+        "6. Decide whether to BUY, SELL, or HOLD ETH at market.\n"
+        "7. Assign a confidence score between 0.0 and 1.0.\n\n"
         "Respond in JSON format.\n"
         "Example:\n"
         "{\"decision\":\"buy\",\"reason\":\"some technical reason\"}\n"
@@ -238,7 +295,8 @@ def ai_trading():
             "chart_data_24h":    df_24h.to_dict(),
             "orderbook":         orderbook,
             "investment_status": filtered_balance,
-            "fear_greed":        fng
+            "fear_greed":        fng,
+            "latest_news":       eth_news_headlines
         },
         ensure_ascii=False,
         default=str
@@ -328,9 +386,9 @@ def ai_trading():
     else:
         print("=== Hold: No action taken ===")
 
-##############################
+########################################################
 # 4) 주기 실행
-##############################
+########################################################
 if __name__ == "__main__":
     while True:
         ai_trading()
