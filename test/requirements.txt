@@ -1,0 +1,5 @@
+python-dotenv
+openai
+pyupbit
+ta
+selenium
