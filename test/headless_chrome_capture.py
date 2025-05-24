@@ -39,6 +39,31 @@ def capture_full_page_screenshot(driver, url, filename):
     driver.get(url)  # 지정한 URL로 이동
     logger.info("페이지 로딩 대기 중...")
     time.sleep(5)    # 페이지 렌더링 대기 (필요시 조정)
+
+    # 1. 시간 메뉴 버튼 클릭
+    menu_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[1]"
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, menu_xpath))
+        ).click()
+        logger.info("시간 메뉴 버튼 클릭 완료")
+    except Exception as e:
+        logger.error(f"시간 메뉴 버튼 클릭 실패: {e}")
+        raise
+
+    # 2. '1시간' 텍스트 클릭
+    one_hour_xpath = "//*[text()='1시간']"
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, one_hour_xpath))
+        ).click()
+        logger.info("'1시간' 버튼 클릭 완료")
+    except Exception as e:
+        logger.error(f"'1시간' 버튼 클릭 실패: {e}")
+        raise
+
+    time.sleep(2)  # 차트 갱신 대기
+
     logger.info("전체 페이지 스크린샷 촬영 중...")
     driver.save_screenshot(filename)  # 스크린샷 저장
     logger.info(f"스크린샷이 성공적으로 저장되었습니다: {filename}")
