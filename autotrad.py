@@ -536,8 +536,11 @@ def ai_trading():
         max_tokens=4095, # JSON응답이 잘리는 경우를 대비 해 최대 토큰 수 증가
         response_format={
             "type": "json_schema",
-            "strict": True,
-            "schema": trade_schema
+            "json_schema": {
+                "name": "trade_decision", # json_schema에 명시된 이름이 무조건 들어가야 함
+                "strict": True,
+                "schema": trade_schema
+            }
         }
     )
 
@@ -545,23 +548,63 @@ def ai_trading():
     gpt_result_str = response.choices[0].message.content
 
     #====================================================================
-    # 6. ChatGPT 응답(JSON) 파싱 및 실제 매매 로직
+    # 6. ChatGPT 응답(JSON) 파싱 및 실제 매매 로직 (예외처리 보강)
     #====================================================================
+    import re
+
+    def save_failed_response(raw_content, filename_prefix="gpt_failed_response"):
+        """
+        GPT 응답이 JSON 파싱에 실패할 경우, 원문을 파일로 저장
+        """
+        import os
+        from datetime import datetime
+        dt = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"{filename_prefix}_{dt}.txt"
+        with open(fname, "w", encoding="utf-8") as f:
+            f.write(raw_content)
+        print(f"[경고] GPT 응답 원문이 {fname}에 저장되었습니다.")
+
+    gpt_result = None
+    refusal_detected = False
+
+    # 1. 응답이 JSON인지 확인 및 파싱
     try:
-        gpt_result = json.loads(gpt_result_str)
+        # OpenAI의 structured output에서 거부(refusal) 메시지는 일반적으로 아래와 같이 올 수 있음
+        # {"type": "refusal", "refusal": "I'm sorry, I cannot assist with that request."}
+        # 또는 그냥 텍스트로 올 수도 있음
+        if gpt_result_str.strip().startswith("{"):
+            gpt_result = json.loads(gpt_result_str)
+            # 거부 메시지 패턴 체크
+            if (isinstance(gpt_result, dict) and
+                (gpt_result.get("type") == "refusal" or "refusal" in gpt_result)):
+                refusal_detected = True
+        else:
+            # JSON이 아닌 경우(거부 등)
+            refusal_detected = True
     except Exception as e:
-        print("GPT 응답이 JSON 형식이 아닙니다. 응답:", gpt_result_str)
+        print("[오류] GPT 응답이 JSON 형식이 아닙니다. 원문 저장 후 종료.")
+        print("[원문]", gpt_result_str)
+        save_failed_response(gpt_result_str)
+        return
+
+    if refusal_detected:
+        print("[거부] GPT가 요청을 거부했습니다. 응답:")
+        print(gpt_result_str)
+        save_failed_response(gpt_result_str, filename_prefix="gpt_refusal")
+        return
+
+    # 2. 필수 필드 체크
+    required_fields = ["decision", "reason", "confidence", "stop_loss", "take_profit"]
+    missing_fields = [f for f in required_fields if f not in gpt_result]
+    if missing_fields:
+        print(f"[오류] GPT 응답에 필수 필드가 누락됨: {missing_fields}")
+        print("GPT 응답:", gpt_result)
+        save_failed_response(gpt_result_str, filename_prefix="gpt_missing_fields")
         return
 
     # (매매 직전 잔고 재확인)
     my_krw = upbit.get_balance("KRW")
     my_eth = upbit.get_balance("KRW-ETH")
-
-    # 응답 필드 체크
-    if "decision" not in gpt_result or "reason" not in gpt_result:
-        print("Error: GPT 응답에 필수 필드(decision/reason)가 누락됨.")
-        print("GPT 응답:", gpt_result)
-        return
 
     decision = gpt_result["decision"]
     reason   = gpt_result["reason"]
