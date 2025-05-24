@@ -5,9 +5,20 @@ import requests
 import pyupbit
 import pandas as pd
 import ta
-
+import base64
+import io
+from PIL import Image
 from dotenv import load_dotenv
 from openai import OpenAI
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import logging
+from datetime import datetime
 
 ########################################################
 # 1) 보조지표 계산 함수
@@ -158,6 +169,134 @@ def get_latest_eth_news_headlines():
         print("[NEWS] SerpAPI Exception:", e)
         return []
 
+def setup_chrome_options():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")           # 최신 Headless 모드 사용
+    chrome_options.add_argument("--disable-gpu")            # GPU 비활성화 (호환성 개선)
+    chrome_options.add_argument("--no-sandbox")             # 샌드박스 비활성화
+    chrome_options.add_argument("--window-size=1920,1080")  # 가상 브라우저 해상도 지정
+    return chrome_options
+
+def create_driver():
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=setup_chrome_options())
+    return driver
+
+# 캡처 + 리사이즈 + 파일저장 + base64 인코딩 함수
+
+def capture_and_encode_screenshot(driver, save_dir="/home/kerdos/gptbitcoin/capture"):
+    logger = logging.getLogger("capture")
+    try:
+        # 스크린샷 캡처
+        png = driver.get_screenshot_as_png()
+        # PIL Image로 변환
+        img = Image.open(io.BytesIO(png))
+        # 이미지 리사이즈 (OpenAI API 제한에 맞춤)
+        img.thumbnail((2000, 2000))
+        # 현재 시간을 파일명에 포함
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"upbit_chart_{current_time}.png"
+        # 저장 경로 생성
+        os.makedirs(save_dir, exist_ok=True)
+        file_path = os.path.join(save_dir, filename)
+        # 이미지 파일로 저장
+        img.save(file_path)
+        logger.info(f"스크린샷이 저장되었습니다: {file_path}")
+        # 이미지를 바이트로 변환
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        # base64로 인코딩
+        base64_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        return base64_image, file_path
+    except Exception as e:
+        logger.error(f"스크린샷 캡처 및 인코딩 중 오류 발생: {e}")
+        return None, None
+
+def capture_full_page_screenshot_and_save_and_encode(url="https://upbit.com/full_chart?code=CRIX.UPBIT.KRW-ETH", save_dir="/home/kerdos/gptbitcoin/capture"):
+    logger = logging.getLogger("capture")
+    start_time = datetime.now()
+    logger.info(f"[CAPTURE] 시작 시각: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    driver = None
+    try:
+        driver = create_driver()
+        driver.get(url)
+        logger.info("페이지 로딩 대기 중...")
+        time.sleep(5)
+
+        # 1. 시간 메뉴 버튼 클릭
+        menu_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[1]"
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, menu_xpath))
+        ).click()
+        logger.info("시간 메뉴 버튼 클릭 완료")
+
+        # 메뉴가 완전히 열릴 때까지 대기
+        dropdown_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[1]/cq-menu-dropdown"
+        WebDriverWait(driver, 5).until(
+            EC.visibility_of_element_located((By.XPATH, dropdown_xpath))
+        )
+        logger.info("드롭다운 메뉴 열림 확인 완료")
+
+        # 2. '1시간' 옵션 클릭
+        one_hour_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[1]/cq-menu-dropdown/cq-item[8]"
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, one_hour_xpath))
+        ).click()
+        logger.info("'1시간' 옵션 클릭 완료")
+        time.sleep(2)
+
+        # 3. 지표 메뉴 버튼 클릭
+        indicator_menu_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[3]"
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, indicator_menu_xpath))
+        ).click()
+        logger.info("지표 메뉴 버튼 클릭 완료")
+
+        # 지표 드롭다운이 완전히 열릴 때까지 대기
+        indicator_dropdown_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[3]/cq-menu-dropdown"
+        WebDriverWait(driver, 5).until(
+            EC.visibility_of_element_located((By.XPATH, indicator_dropdown_xpath))
+        )
+        logger.info("지표 드롭다운 메뉴 열림 확인 완료")
+
+        # 4. 볼린저 밴드 옵션 클릭
+        bollinger_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[3]/cq-menu-dropdown/cq-scroll/cq-studies/cq-studies-content/cq-item[15]"
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, bollinger_xpath))
+        ).click()
+        logger.info("'볼린저 밴드' 옵션 클릭 완료")
+        time.sleep(2)
+        # 캡처+리사이즈+base64 인코딩
+        base64_image, file_path = capture_and_encode_screenshot(driver, save_dir)
+        logger.info(f"최종 캡처 파일: {file_path}")
+        return base64_image, file_path
+    except Exception as e:
+        logger.error(f"[CAPTURE] 오류 발생: {e}")
+        return None, None
+    finally:
+        if driver:
+            driver.quit()
+        end_time = datetime.now()
+        logger.info(f"[CAPTURE] 종료 시각: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"[CAPTURE] 총 소요 시간: {end_time - start_time}")
+
+def get_latest_chart_image_base64(capture_dir="/home/kerdos/gptbitcoin/capture"):
+    """
+    캡처 디렉토리에서 가장 최근에 저장된 이미지를 base64로 인코딩하여 반환
+    """
+    import glob
+    image_files = sorted(
+        glob.glob(os.path.join(capture_dir, "*.png")),
+        key=os.path.getmtime,
+        reverse=True
+    )
+    if not image_files:
+        print("[Vision] 캡처 이미지가 없습니다.")
+        return None
+    image_path = image_files[0]
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
 ########################################################
 # 3) 메인 자동매매 함수
 ########################################################
@@ -172,7 +311,6 @@ def ai_trading():
     df_24h            = None  # 24시간치 1시간봉 데이터프레임
     orderbook         = None  # 현재 오더북 정보
     fng               = None  # 공포·탐욕 지수 정보
-    data_for_gpt_json = None  # ChatGPT에 전달할 데이터(JSON)
     system_prompt     = None  # ChatGPT 시스템 프롬프트
     client            = None  # OpenAI API 클라이언트 객체
     response          = None  # ChatGPT API 응답 객체
@@ -258,6 +396,20 @@ def ai_trading():
     eth_news_headlines = get_latest_eth_news_headlines()
 
     #====================================================================
+    # 3-3. 차트 이미지 캡처 (내장 로직 직접 실행, base64 바로 활용)
+    #====================================================================
+    try:
+        print("[Vision] 차트 이미지 캡처 및 인코딩 시작...")
+        chart_image_base64, file_path = capture_full_page_screenshot_and_save_and_encode()
+        if file_path:
+            print(f"[Vision] 차트 이미지 캡처 완료: {file_path}")
+        else:
+            print("[Vision] 차트 이미지 캡처 실패")
+    except Exception as e:
+        print(f"[Vision] 차트 이미지 캡처 실패: {e}")
+        chart_image_base64 = None
+
+    #====================================================================
     # 4. ChatGPT에게 전달할 데이터 준비 (JSON)
     #====================================================================
     # 시스템 프롬프트 설정
@@ -270,7 +422,8 @@ def ai_trading():
         "- Account balances (e.g., KRW, ETH)\n"
         "- Fear & Greed Index { \"value\": int, \"classification\": string }\n"
         "- Latest Ethereum-related news headlines (list of title, snippet, source, date)\n"
-        "- Estimated trading fees (in %) and maximum risk per trade (in % of account)\n\n"
+        "- Estimated trading fees (in %) and maximum risk per trade (in % of account)\n"
+        "- Chart image analysis (summary from OpenAI Vision API)\n"
         "Your task:\n"
         "1. Analyze technical indicators (e.g., MACD, RSI, Bollinger Bands) on both timeframes.\n"
         "2. Incorporate Fear & Greed Index as an additional risk-sentiment signal:\n"
@@ -289,19 +442,6 @@ def ai_trading():
         "{\"decision\":\"hold\",\"reason\":\"some technical reason\"}"
     )
 
-    data_for_gpt_json = json.dumps(
-        {
-            "chart_data_30d":    df_30d.to_dict(),
-            "chart_data_24h":    df_24h.to_dict(),
-            "orderbook":         orderbook,
-            "investment_status": filtered_balance,
-            "fear_greed":        fng,
-            "latest_news":       eth_news_headlines
-        },
-        ensure_ascii=False,
-        default=str
-    )
-
     #====================================================================
     # 5. ChatGPT API 콜 (gpt-4o, etc.)
     #====================================================================
@@ -310,8 +450,28 @@ def ai_trading():
         model="gpt-4o",
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": data_for_gpt_json}
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"""Current investment status: {json.dumps(filtered_balance)}
+                            Orderbook: {json.dumps(orderbook)}
+                            Daily OHLCV with indicators (30 days): {df_30d.to_json()}
+                            Hourly OHLCV with indicators (24 hours): {df_24h.to_json()}
+                            Recent news headlines: {json.dumps(eth_news_headlines)}
+                            Fear and Greed Index: {json.dumps(fng)}"""
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{chart_image_base64}"
+                        }
+                    }
+                ]
+            }
         ],
+        max_tokens=1024,
         response_format={"type": "json_object"}
     )
 

@@ -75,6 +75,41 @@ def capture_full_page_screenshot(driver, url, filename):
 
     time.sleep(2)  # 차트 갱신 대기
 
+    # 3. 지표 메뉴 버튼 클릭
+    indicator_menu_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[3]"
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, indicator_menu_xpath))
+        ).click()
+        logger.info("지표 메뉴 버튼 클릭 완료")
+    except Exception as e:
+        logger.error(f"지표 메뉴 버튼 클릭 실패: {e}")
+        raise
+
+    # 지표 드롭다운이 완전히 열릴 때까지 대기
+    indicator_dropdown_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[3]/cq-menu-dropdown"
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.visibility_of_element_located((By.XPATH, indicator_dropdown_xpath))
+        )
+        logger.info("지표 드롭다운 메뉴 열림 확인 완료")
+    except Exception as e:
+        logger.error(f"지표 드롭다운 메뉴 대기 실패: {e}")
+        raise
+
+    # 4. 볼린저 밴드 옵션 클릭
+    bollinger_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[3]/cq-menu-dropdown/cq-scroll/cq-studies/cq-studies-content/cq-item[15]"
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, bollinger_xpath))
+        ).click()
+        logger.info("'볼린저 밴드' 옵션 클릭 완료")
+    except Exception as e:
+        logger.error(f"'볼린저 밴드' 옵션 클릭 실패: {e}")
+        raise
+
+    time.sleep(2)  # 지표 적용 대기
+
     logger.info("전체 페이지 스크린샷 촬영 중...")
     driver.save_screenshot(filename)  # 스크린샷 저장
     logger.info(f"스크린샷이 성공적으로 저장되었습니다: {filename}")
