@@ -51,15 +51,26 @@ def capture_full_page_screenshot(driver, url, filename):
         logger.error(f"시간 메뉴 버튼 클릭 실패: {e}")
         raise
 
-    # 2. '1시간' 텍스트 클릭
-    one_hour_xpath = "//*[text()='1시간']"
+    # 메뉴가 완전히 열릴 때까지 대기
+    dropdown_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[1]/cq-menu-dropdown"
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.visibility_of_element_located((By.XPATH, dropdown_xpath))
+        )
+        logger.info("드롭다운 메뉴 열림 확인 완료")
+    except Exception as e:
+        logger.error(f"드롭다운 메뉴 대기 실패: {e}")
+        raise
+
+    # 2. '1시간' 옵션 클릭 (정확한 Xpath 사용)
+    one_hour_xpath = "/html/body/div[1]/div[2]/div[3]/span/div/div/div[1]/div/div/cq-menu[1]/cq-menu-dropdown/cq-item[8]"
     try:
         WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, one_hour_xpath))
         ).click()
-        logger.info("'1시간' 버튼 클릭 완료")
+        logger.info("'1시간' 옵션 클릭 완료")
     except Exception as e:
-        logger.error(f"'1시간' 버튼 클릭 실패: {e}")
+        logger.error(f"'1시간' 옵션 클릭 실패: {e}")
         raise
 
     time.sleep(2)  # 차트 갱신 대기
