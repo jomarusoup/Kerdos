@@ -19,6 +19,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import logging
 from datetime import datetime
+from youtube_transcript_api import YouTubeTranscriptApi
 
 ########################################################
 # 1) 보조지표 계산 함수
@@ -169,6 +170,11 @@ def get_latest_eth_news_headlines():
         print("[NEWS] SerpAPI Exception:", e)
         return []
 
+#========================================================
+# 2-3) 차트 이미지 캡처 함수
+#========================================================
+
+#--- chrome 옵션 설정 함수
 def setup_chrome_options():
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")           # 최신 Headless 모드 사용
@@ -177,13 +183,13 @@ def setup_chrome_options():
     chrome_options.add_argument("--window-size=1920,1080")  # 가상 브라우저 해상도 지정
     return chrome_options
 
+#--- chrome 드라이버 생성 함수
 def create_driver():
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=setup_chrome_options())
     return driver
 
-# 캡처 + 리사이즈 + 파일저장 + base64 인코딩 함수
-
+#--- 캡처 + 리사이즈 + 파일저장 + base64 인코딩 함수
 def capture_and_encode_screenshot(driver, save_dir="/home/kerdos/gptbitcoin/capture"):
     logger = logging.getLogger("capture")
     try:
@@ -212,6 +218,7 @@ def capture_and_encode_screenshot(driver, save_dir="/home/kerdos/gptbitcoin/capt
         logger.error(f"스크린샷 캡처 및 인코딩 중 오류 발생: {e}")
         return None, None
 
+#--- 전체 페이지 캡처 함수
 def capture_full_page_screenshot_and_save_and_encode(url="https://upbit.com/full_chart?code=CRIX.UPBIT.KRW-ETH", save_dir="/home/kerdos/gptbitcoin/capture"):
     logger = logging.getLogger("capture")
     start_time = datetime.now()
@@ -280,6 +287,7 @@ def capture_full_page_screenshot_and_save_and_encode(url="https://upbit.com/full
         logger.info(f"[CAPTURE] 종료 시각: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"[CAPTURE] 총 소요 시간: {end_time - start_time}")
 
+#--- 캡처 디렉토리에서 가장 최근에 저장된 이미지를 base64로 인코딩하여 반환
 def get_latest_chart_image_base64(capture_dir="/home/kerdos/gptbitcoin/capture"):
     """
     캡처 디렉토리에서 가장 최근에 저장된 이미지를 base64로 인코딩하여 반환
@@ -296,6 +304,18 @@ def get_latest_chart_image_base64(capture_dir="/home/kerdos/gptbitcoin/capture")
     image_path = image_files[0]
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
+
+#========================================================
+# 2-4) 유튜브 자막 데이터 추출 함수
+#========================================================
+def get_combined_transcript(video_id):
+    try:
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        combined_text = ' '.join(entry['text'] for entry in transcript)
+        return combined_text
+    except Exception as e:
+        print(f"[YouTube] 자막 추출 실패: {e}")
+        return ""
 
 ########################################################
 # 3) 메인 자동매매 함수
@@ -410,6 +430,12 @@ def ai_trading():
         chart_image_base64 = None
 
     #====================================================================
+    # 3-4. 유튜브 자막 데이터 추출
+    #====================================================================
+    youtube_video_id = os.getenv("YOUTUBE_VIDEO_ID", "TWINrTppUl4")  # 기본값 예시
+    youtube_transcript = get_combined_transcript(youtube_video_id)
+
+    #====================================================================
     # 4. ChatGPT에게 전달할 데이터 준비 (JSON)
     #====================================================================
     # 시스템 프롬프트 설정
@@ -424,6 +450,7 @@ def ai_trading():
         "- Latest Ethereum-related news headlines (list of title, snippet, source, date)\n"
         "- Estimated trading fees (in %) and maximum risk per trade (in % of account)\n"
         "- Chart image analysis (summary from OpenAI Vision API)\n"
+        "- Recent YouTube transcript (investment-related)\n"
         "Your task:\n"
         "1. Analyze technical indicators (e.g., MACD, RSI, Bollinger Bands) on both timeframes.\n"
         "2. Incorporate Fear & Greed Index as an additional risk-sentiment signal:\n"
@@ -446,6 +473,38 @@ def ai_trading():
     # 5. ChatGPT API 콜 (gpt-4o, etc.)
     #====================================================================
     client   = OpenAI()
+
+    trade_schema = {
+        "type": "object",
+        "properties": {
+            "decision": {
+                "type": "string",
+                "enum": ["buy", "sell", "hold"],
+                "description": "매매 결정 (buy, sell, hold 중 하나)"
+            },
+            "reason": {
+                "type": "string",
+                "description": "매매 결정의 사유"
+            },
+            "confidence": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "description": "매매 결정에 대한 신뢰도 (0.0~1.0)"
+            },
+            "stop_loss": {
+                "type": ["number", "null"],
+                "description": "손절가 (없으면 null)"
+            },
+            "take_profit": {
+                "type": ["number", "null"],
+                "description": "익절가 (없으면 null)"
+            }
+        },
+        "required": ["decision", "reason", "confidence", "stop_loss", "take_profit"],
+        "additionalProperties": False
+    }
+
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
@@ -455,12 +514,15 @@ def ai_trading():
                 "content": [
                     {
                         "type": "text",
-                        "text": f"""Current investment status: {json.dumps(filtered_balance)}
-                            Orderbook: {json.dumps(orderbook)}
-                            Daily OHLCV with indicators (30 days): {df_30d.to_json()}
-                            Hourly OHLCV with indicators (24 hours): {df_24h.to_json()}
-                            Recent news headlines: {json.dumps(eth_news_headlines)}
-                            Fear and Greed Index: {json.dumps(fng)}"""
+                        "text": (
+                            f"Current investment status: {json.dumps(filtered_balance)}\n"
+                            f"Orderbook: {json.dumps(orderbook)}\n"
+                            f"Daily OHLCV with indicators (30 days): {df_30d.to_json()}\n"
+                            f"Hourly OHLCV with indicators (24 hours): {df_24h.to_json()}\n"
+                            f"Recent news headlines: {json.dumps(eth_news_headlines)}\n"
+                            f"Fear and Greed Index: {json.dumps(fng)}\n"
+                            f"Recent YouTube transcript (investment-related): {youtube_transcript[:1000]}..."
+                        )
                     },
                     {
                         "type": "image_url",
@@ -471,8 +533,12 @@ def ai_trading():
                 ]
             }
         ],
-        max_tokens=1024,
-        response_format={"type": "json_object"}
+        max_tokens=4095, # JSON응답이 잘리는 경우를 대비 해 최대 토큰 수 증가
+        response_format={
+            "type": "json_schema",
+            "strict": True,
+            "schema": trade_schema
+        }
     )
 
     # ChatGPT 응답
