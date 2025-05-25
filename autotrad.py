@@ -20,6 +20,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import logging
 from datetime import datetime
 from youtube_transcript_api import YouTubeTranscriptApi
+import psycopg2
 
 ########################################################
 # 1) 보조지표 계산 함수
@@ -310,7 +311,7 @@ def get_latest_chart_image_base64(capture_dir="/home/kerdos/gptbitcoin/capture")
 #========================================================
 def get_combined_transcript(video_id):
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, language=['ko'])
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['ko'])
         combined_text = ' '.join(entry['text'] for entry in transcript)
         return combined_text
     except Exception as e:
@@ -320,6 +321,60 @@ def get_combined_transcript(video_id):
 ########################################################
 # 3) 메인 자동매매 함수
 ########################################################
+def init_postgres_table():
+    """
+    PostgreSQL에 매매 기록 테이블이 없으면 생성하는 함수
+    환경변수에서 DB 접속 정보를 읽어옴
+    """
+    # DB 연결
+    conn = psycopg2.connect(
+        dbname=os.getenv("PG_DBNAME"),
+        user=os.getenv("PG_USER"),
+        password=os.getenv("PG_PASSWORD"),
+        host=os.getenv("PG_HOST", "localhost"),
+        port=os.getenv("PG_PORT", "5432")
+    )
+    cur = conn.cursor()
+    # trade_log 테이블이 없으면 생성
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS trade_log (
+            id SERIAL PRIMARY KEY,
+            time TIMESTAMP NOT NULL,
+            decision VARCHAR(10),
+            percentage NUMERIC,
+            reason TEXT,
+            eth_blance NUMERIC,
+            krw_blance NUMERIC,
+            eth_avg_buy_price NUMERIC,
+            eth_krw_price NUMERIC
+        );
+    ''')
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def save_trade_to_postgres(time, decision, percentage, reason, eth_blance, krw_blance, eth_avg_buy_price, eth_krw_price):
+    """
+    매매 데이터를 PostgreSQL의 trade_log 테이블에 저장하는 함수
+    """
+    # DB 연결
+    conn = psycopg2.connect(
+        dbname=os.getenv("PG_DBNAME"),
+        user=os.getenv("PG_USER"),
+        password=os.getenv("PG_PASSWORD"),
+        host=os.getenv("PG_HOST", "localhost"),
+        port=os.getenv("PG_PORT", "5432")
+    )
+    cur = conn.cursor()
+    # 데이터 insert
+    cur.execute('''
+        INSERT INTO trade_log (time, decision, percentage, reason, eth_blance, krw_blance, eth_avg_buy_price, eth_krw_price)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    ''', (time, decision, percentage, reason, eth_blance, krw_blance, eth_avg_buy_price, eth_krw_price))
+    conn.commit()
+    cur.close()
+    conn.close()
+
 def ai_trading():
     #--- 변수 초기화
     access            = None  # 업비트 API 액세스 키
@@ -343,10 +398,11 @@ def ai_trading():
     orderbook_now     = None  # 실시간 오더북 정보(매도 시)
     current_price     = None  # 현재가(매도 시)
     total_value       = None  # ETH 총 평가금액(매도 시)
-
     #--- .env 파일에서 환경변수 로드
     load_dotenv()
-
+    # Postgres 테이블 초기화(최초 1회만 실행, 반복 호출해도 무방)
+    # (테이블이 없으면 생성, 있으면 아무 일도 안 함)
+    init_postgres_table()
     #--- 업비트 로그인
     access = os.getenv("UPBIT_ACCESS_KEY")
     secret = os.getenv("UPBIT_SECRET_KEY")
@@ -469,9 +525,9 @@ def ai_trading():
         "\n"
         "Respond in JSON format. The JSON must include: decision, percentage, reason, confidence, stop_loss, take_profit.\n"
         "Example:\n"
-        '{"decision":"buy","percentage":50,"reason":"기술적 분석 결과 및 워뇨띠 매매법에 따라 매수 신호가 강함 (보유 KRW의 50% 매수)","confidence":0.85,"stop_loss":3200000,"take_profit":3600000}'\n'
-        '{"decision":"sell","percentage":100,"reason":"과매수 구간 진입 및 워뇨띠 매매법에 따라 매도 신호 (보유 ETH의 100% 매도)","confidence":0.9,"stop_loss":null,"take_profit":null}'\n'
-        '{"decision":"hold","percentage":0,"reason":"명확한 신호 없음 (매매 없음, 워뇨띠 매매법 참고)","confidence":0.6,"stop_loss":null,"take_profit":null}'\n'
+        '{"decision":"buy","percentage":50,"reason":"기술적 분석 결과 및 워뇨띠 매매법에 따라 매수 신호가 강함 (보유 KRW의 50% 매수)","confidence":0.85,"stop_loss":3200000,"take_profit":3600000}' "\n"
+        '{"decision":"sell","percentage":100,"reason":"과매수 구간 진입 및 워뇨띠 매매법에 따라 매도 신호 (보유 ETH의 100% 매도)","confidence":0.9,"stop_loss":null,"take_profit":null}' "\n"
+        '{"decision":"hold","percentage":0,"reason":"명확한 신호 없음 (매매 없음, 워뇨띠 매매법 참고)","confidence":0.6,"stop_loss":null,"take_profit":null}' "\n"
         "\n"
         "Below is the full YouTube transcript (in Korean) of Wonyotti's trading method. Always refer to this in your analysis.\n"
     )
@@ -658,6 +714,30 @@ def ai_trading():
 
     else:
         print("=== Hold: No action taken ===")
+
+    # 평균 매수단가, 현재 ETH 원화가
+    eth_avg_buy_price = None
+    eth_krw_price = None
+    for item in all_balance:
+        if item['currency'] == 'ETH':
+            eth_avg_buy_price = float(item.get('avg_buy_price', 0))
+            break
+    # 현재 ETH 시세
+    orderbook_now = pyupbit.get_orderbook("KRW-ETH")
+    if orderbook_now and isinstance(orderbook_now, dict) and 'orderbook_units' in orderbook_now:
+        eth_krw_price = orderbook_now['orderbook_units'][0]['ask_price']
+
+    # DB 저장 (매매 실행 후, 잔고/가격 등과 함께 기록)
+    save_trade_to_postgres(
+        datetime.now(),
+        decision,
+        percentage,
+        reason,
+        my_eth,
+        my_krw,
+        eth_avg_buy_price,
+        eth_krw_price
+    )
 
 ########################################################
 # 4) 주기 실행
