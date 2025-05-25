@@ -343,8 +343,8 @@ def init_postgres_table():
             decision VARCHAR(10),
             percentage NUMERIC,
             reason TEXT,
-            eth_blance NUMERIC,
-            krw_blance NUMERIC,
+            eth_balance NUMERIC,
+            krw_balance NUMERIC,
             eth_avg_buy_price NUMERIC,
             eth_krw_price NUMERIC
         );
@@ -353,7 +353,7 @@ def init_postgres_table():
     cur.close()
     conn.close()
 
-def save_trade_to_postgres(time, decision, percentage, reason, eth_blance, krw_blance, eth_avg_buy_price, eth_krw_price):
+def save_trade_to_postgres(time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price):
     """
     매매 데이터를 PostgreSQL의 trade_log 테이블에 저장하는 함수
     """
@@ -368,9 +368,9 @@ def save_trade_to_postgres(time, decision, percentage, reason, eth_blance, krw_b
     cur = conn.cursor()
     # 데이터 insert
     cur.execute('''
-        INSERT INTO trade_log (time, decision, percentage, reason, eth_blance, krw_blance, eth_avg_buy_price, eth_krw_price)
+        INSERT INTO trade_log (time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    ''', (time, decision, percentage, reason, eth_blance, krw_blance, eth_avg_buy_price, eth_krw_price))
+    ''', (time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price))
     conn.commit()
     cur.close()
     conn.close()
@@ -733,8 +733,8 @@ def ai_trading():
         decision,
         percentage,
         reason,
-        my_eth,
-        my_krw,
+        my_eth,      # eth_balance
+        my_krw,      # krw_balance
         eth_avg_buy_price,
         eth_krw_price
     )
