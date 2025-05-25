@@ -18,7 +18,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from youtube_transcript_api import YouTubeTranscriptApi
 import psycopg2
 
@@ -323,57 +323,131 @@ def get_combined_transcript(video_id):
 ########################################################
 def init_postgres_table():
     """
-    PostgreSQL에 매매 기록 테이블이 없으면 생성하는 함수
-    환경변수에서 DB 접속 정보를 읽어옴
+    Create eth_auto_trad table with reflection column if it does not exist.
     """
-    # DB 연결
-    conn = psycopg2.connect(
+    with psycopg2.connect(
         dbname=os.getenv("PG_DBNAME"),
         user=os.getenv("PG_USER"),
         password=os.getenv("PG_PASSWORD"),
         host=os.getenv("PG_HOST", "localhost"),
         port=os.getenv("PG_PORT", "5432")
-    )
-    cur = conn.cursor()
-    # eth_autotrad 테이블이 없으면 생성
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS eth_autotrad (
-            id SERIAL PRIMARY KEY,
-            time TIMESTAMP NOT NULL,
-            decision VARCHAR(10),
-            percentage NUMERIC,
-            reason TEXT,
-            eth_balance NUMERIC,
-            krw_balance NUMERIC,
-            eth_avg_buy_price NUMERIC,
-            eth_krw_price NUMERIC
-        );
-    ''')
-    conn.commit()
-    cur.close()
-    conn.close()
+    ) as conn:
+        with conn.cursor() as cur:
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS eth_auto_trad (
+                    id SERIAL PRIMARY KEY,
+                    time TIMESTAMP NOT NULL,
+                    decision VARCHAR(10),
+                    percentage NUMERIC,
+                    reason TEXT,
+                    eth_balance NUMERIC,
+                    krw_balance NUMERIC,
+                    eth_avg_buy_price NUMERIC,
+                    eth_krw_price NUMERIC,
+                    reflection TEXT
+                );
+            ''')
+            conn.commit()
 
-def save_trade_to_postgres(time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price):
+
+def log_trade_postgres(decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price, reflection=None):
     """
-    매매 데이터를 PostgreSQL의 eth_autotrad 테이블에 저장하는 함수
+    매매 기록을 eth_autotrad 테이블에 저장 (reflection 포함)
     """
-    # DB 연결
-    conn = psycopg2.connect(
+    with psycopg2.connect(
         dbname=os.getenv("PG_DBNAME"),
         user=os.getenv("PG_USER"),
         password=os.getenv("PG_PASSWORD"),
         host=os.getenv("PG_HOST", "localhost"),
         port=os.getenv("PG_PORT", "5432")
+    ) as conn:
+        with conn.cursor() as cur:
+            now = datetime.now()
+            if reflection is not None:
+                cur.execute('''
+                    INSERT INTO eth_auto_trad
+                    (time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price, reflection)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (now, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price, reflection))
+            else:
+                cur.execute('''
+                    INSERT INTO eth_auto_trad
+                    (time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (now, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price))
+            conn.commit()
+
+
+def get_recent_trades_postgres(days=7):
+    """
+    최근 days일간의 매매 내역을 DataFrame으로 반환 (최신순)
+    """
+    with psycopg2.connect(
+        dbname=os.getenv("PG_DBNAME"),
+        user=os.getenv("PG_USER"),
+        password=os.getenv("PG_PASSWORD"),
+        host=os.getenv("PG_HOST", "localhost"),
+        port=os.getenv("PG_PORT", "5432")
+    ) as conn:
+        with conn.cursor() as cur:
+            since = datetime.now() - timedelta(days=days)
+            cur.execute("SELECT * FROM eth_auto_trad WHERE time > %s ORDER BY time DESC", (since,))
+            columns = [desc[0] for desc in cur.description]
+            rows = cur.fetchall()
+            df = pd.DataFrame(rows, columns=columns)
+    return df
+
+
+def calculate_performance(trades_df):
+    if trades_df.empty:
+        return 0
+    initial_balance = trades_df.iloc[-1]['krw_balance'] + trades_df.iloc[-1]['eth_balance'] * trades_df.iloc[-1]['eth_krw_price']
+    final_balance = trades_df.iloc[0]['krw_balance'] + trades_df.iloc[0]['eth_balance'] * trades_df.iloc[0]['eth_krw_price']
+    return (final_balance - initial_balance) / initial_balance * 100
+
+
+def generate_reflection(trades_df, current_market_data):
+    performance = calculate_performance(trades_df)
+    last_reflection = trades_df.iloc[0]['reflection'] if not trades_df.empty and 'reflection' in trades_df.columns and trades_df.iloc[0]['reflection'] else ""
+    client = OpenAI()
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are an autonomous crypto trading AI that learns from its own mistakes and successes. "
+                    "Your goal is to become a better trader by reflecting on your recent trades, market conditions, and your previous self-reflection. "
+                    "Be honest and critical. Focus on actionable lessons and practical improvements."
+                )
+            },
+            {
+                "role": "user",
+                "content": f"""
+Recent trading data:
+{trades_df.to_json(orient='records')}
+
+Current market data:
+{current_market_data}
+
+Overall performance in the last 7 days: {performance:.2f}%
+
+Previous reflection:
+{last_reflection}
+
+Please analyze this data and provide a structured reflection with the following sections:
+1. **Reflection:** Briefly summarize your overall trading performance and decision quality.
+2. **What worked well:** List specific strategies or decisions that were effective.
+3. **What didn't work:** Identify mistakes, missed opportunities, or poor decisions.
+4. **Actionable improvement:** Clearly state what you will do differently in your next trades.
+5. **Market pattern/trend:** Note any patterns or trends you observe in the market data.
+
+Be concise and practical. Limit your response to 200 words or less.
+"""
+            }
+        ]
     )
-    cur = conn.cursor()
-    # 데이터 insert
-    cur.execute('''
-        INSERT INTO eth_autotrad (time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    ''', (time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price))
-    conn.commit()
-    cur.close()
-    conn.close()
+    return response.choices[0].message.content
 
 def ai_trading():
     #--- 변수 초기화
@@ -727,16 +801,27 @@ def ai_trading():
     if orderbook_now and isinstance(orderbook_now, dict) and 'orderbook_units' in orderbook_now:
         eth_krw_price = orderbook_now['orderbook_units'][0]['ask_price']
 
-    # DB 저장 (매매 실행 후, 잔고/가격 등과 함께 기록)
-    save_trade_to_postgres(
-        datetime.now(),
+    # === reflection 생성 ===
+    recent_trades = get_recent_trades_postgres(days=7)
+    current_market_data = {
+        "fear_greed_index": fng,
+        "news_headlines": eth_news_headlines,
+        "orderbook": orderbook,
+        "daily_ohlcv": df_30d.tail(5).to_dict(),
+        "hourly_ohlcv": df_24h.tail(5).to_dict()
+    }
+    reflection = generate_reflection(recent_trades, json.dumps(current_market_data))
+
+    # DB 저장 (매매 실행 후, 잔고/가격 등과 함께 기록, reflection 포함)
+    log_trade_postgres(
         decision,
         percentage,
         reason,
         my_eth,      # eth_balance
         my_krw,      # krw_balance
         eth_avg_buy_price,
-        eth_krw_price
+        eth_krw_price,
+        reflection
     )
 
 ########################################################
