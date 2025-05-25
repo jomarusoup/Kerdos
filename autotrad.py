@@ -458,15 +458,15 @@ def ai_trading():
         "   - Extreme Greed → consider profit-taking or avoid new longs\n"
         "3. Consider the latest news headlines for any major events or sentiment that could affect ETH price (e.g., regulations, hacks, ETF news, etc).\n"
         "   - If no news is provided, ignore this factor and focus on other data.\n"
-        "4. Calculate an optimal position size based on maximum risk per trade.\n"
+        "4. Calculate an optimal position size based on maximum risk per trade, and output the percentage (%) of available KRW to buy (if decision is 'buy'), or percentage (%) of available ETH to sell (if decision is 'sell'), as 'percentage'. For 'hold', set percentage to 0.\n"
         "5. Recommend stop-loss and take-profit levels if appropriate.\n"
         "6. Decide whether to BUY, SELL, or HOLD ETH at market.\n"
         "7. Assign a confidence score between 0.0 and 1.0.\n\n"
-        "Respond in JSON format.\n"
+        "Respond in JSON format. The JSON must include: decision, percentage, reason, confidence, stop_loss, take_profit.\n"
         "Example:\n"
-        "{\"decision\":\"buy\",\"reason\":\"some technical reason\"}\n"
-        "{\"decision\":\"sell\",\"reason\":\"some technical reason\"}\n"
-        "{\"decision\":\"hold\",\"reason\":\"some technical reason\"}"
+        '{"decision":"buy","percentage":50,"reason":"기술적 분석 결과 매수 신호가 강함 (보유 KRW의 50% 매수)","confidence":0.85,"stop_loss":3200000,"take_profit":3600000}"\n'
+        '{"decision":"sell","percentage":100,"reason":"과매수 구간 진입 및 악재 뉴스 (보유 ETH의 100% 매도)","confidence":0.9,"stop_loss":null,"take_profit":null}"\n'
+        '{"decision":"hold","percentage":0,"reason":"명확한 신호 없음 (매매 없음)","confidence":0.6,"stop_loss":null,"take_profit":null}"'
     )
 
     #====================================================================
@@ -614,49 +614,40 @@ def ai_trading():
 
     decision = gpt_result["decision"]
     reason   = gpt_result["reason"]
+    percentage = gpt_result["percentage"]
 
     print("### ChatGPT Decision:", decision.upper(), "###")
     print("### ChatGPT Reason:", reason, "###")
+    print(f"### ChatGPT Percentage: {percentage}% ###")
 
     #====================================================================
     # 7. 매매 실행
     #====================================================================
     if decision == "buy":
         if my_krw > 5000:
-            print("=== Buy Order Executed ===")
-            buy_result = upbit.buy_market_order("KRW-ETH", my_krw * 0.9995)
-            print(buy_result)
+            buy_amount = my_krw * (percentage / 100) * 0.9995  # 비율 반영 + 수수료 차감
+            if buy_amount > 5000:
+                print(f"=== Buy Order Executed: {buy_amount:.0f} KRW ===")
+                buy_result = upbit.buy_market_order("KRW-ETH", buy_amount)
+                print(buy_result)
+            else:
+                print("매수 금액이 5000원 미만입니다.")
         else:
             print("KRW 잔액 부족 (5000원 이상 필요)")
 
     elif decision == "sell":
-        orderbook_now = pyupbit.get_orderbook("KRW-ETH")
-
-        # ───────────────────────────────────────────
-        # 방어 코드: orderbook_now 구조와 데이터 유효성 검사
-        # ───────────────────────────────────────────
-        if (not orderbook_now
-            or not isinstance(orderbook_now, list)
-            or len(orderbook_now) == 0):
-            print("오더북 데이터를 불러오지 못했습니다. 매도를 중단합니다.")
-            return
-
-        if ("orderbook_units" not in orderbook_now[0]
-            or len(orderbook_now[0]["orderbook_units"]) == 0):
-            print("오더북에 주문 단위 정보가 없습니다. 매도를 중단합니다.")
-            return
-
-        # ───────────────────────────────────────────
-        # 정상적인 매도 로직
-        # ───────────────────────────────────────────
-        current_price = orderbook_now[0]["orderbook_units"][0]["ask_price"]
-        total_value   = my_eth * current_price
-        if total_value > 5000:
-            print("=== Sell Order Executed ===")
-            sell_result = upbit.sell_market_order("KRW-ETH", my_eth)
-            print(sell_result)
+        my_eth = upbit.get_balance("KRW-ETH")
+        sell_amount = my_eth * (percentage / 100)
+        orderbook = pyupbit.get_orderbook("KRW-ETH")
+        if orderbook and isinstance(orderbook, dict) and 'orderbook_units' in orderbook:
+            current_price = orderbook['orderbook_units'][0]['ask_price']
+            if sell_amount * current_price > 5000:
+                print(f"### Sell Order Executed: {percentage}% of held ETH ###")
+                print(upbit.sell_market_order("KRW-ETH", sell_amount))
+            else:
+                print("### 매도 주문 실패: ETH 부족 (5000 KRW 미만) ###")
         else:
-            print("ETH 가치가 5000원 미만. 매도 불가")
+            print("오더북 데이터를 불러오지 못했습니다. 매매를 중단합니다.")
 
     else:
         print("=== Hold: No action taken ===")
