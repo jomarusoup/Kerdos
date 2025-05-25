@@ -318,9 +318,9 @@ def get_combined_transcript(video_id):
         print(f"[YouTube] 자막 추출 실패: {e}")
         return ""
 
-########################################################
-# 3) 메인 자동매매 함수
-########################################################
+#========================================================
+# 2-5) Postgres 테이블 초기화 함수
+#========================================================
 def init_postgres_table():
     """
     Create eth_auto_trad table with reflection column if it does not exist.
@@ -349,7 +349,9 @@ def init_postgres_table():
             ''')
             conn.commit()
 
-
+#========================================================
+# 2-6) Postgres 매매 기록 저장 함수
+#========================================================
 def log_trade_postgres(decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price, reflection=None):
     """
     매매 기록을 eth_autotrad 테이블에 저장 (reflection 포함)
@@ -377,7 +379,9 @@ def log_trade_postgres(decision, percentage, reason, eth_balance, krw_balance, e
                 ''', (now, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price))
             conn.commit()
 
-
+#========================================================
+# 2-7) Postgres 최근 매매 내역 조회 함수
+#========================================================
 def get_recent_trades_postgres(days=7):
     """
     최근 days일간의 매매 내역을 DataFrame으로 반환 (최신순)
@@ -397,7 +401,9 @@ def get_recent_trades_postgres(days=7):
             df = pd.DataFrame(rows, columns=columns)
     return df
 
-
+#========================================================
+# 2-8) 매매 성과 계산 함수
+#========================================================
 def calculate_performance(trades_df):
     if trades_df.empty:
         return 0
@@ -405,7 +411,9 @@ def calculate_performance(trades_df):
     final_balance = trades_df.iloc[0]['krw_balance'] + trades_df.iloc[0]['eth_balance'] * trades_df.iloc[0]['eth_krw_price']
     return (final_balance - initial_balance) / initial_balance * 100
 
-
+#========================================================
+# 2-9) 매매 반영 함수
+#========================================================
 def generate_reflection(trades_df, current_market_data):
     performance = calculate_performance(trades_df)
     last_reflection = trades_df.iloc[0]['reflection'] if not trades_df.empty and 'reflection' in trades_df.columns and trades_df.iloc[0]['reflection'] else ""
@@ -449,6 +457,9 @@ Be concise and practical. Limit your response to 200 words or less.
     )
     return response.choices[0].message.content
 
+########################################################
+# 3) 메인 자동매매 함수
+########################################################
 def ai_trading():
     #--- 변수 초기화
     access            = None  # 업비트 API 액세스 키
@@ -803,14 +814,20 @@ def ai_trading():
 
     # === reflection 생성 ===
     recent_trades = get_recent_trades_postgres(days=7)
+    # 날짜 인덱스를 문자열로 변환
+    df_30d_tail = df_30d.tail(5).reset_index()
+    df_30d_tail['index'] = df_30d_tail['index'].astype(str)
+    df_24h_tail = df_24h.tail(5).reset_index()
+    df_24h_tail['index'] = df_24h_tail['index'].astype(str)
+
     current_market_data = {
         "fear_greed_index": fng,
         "news_headlines": eth_news_headlines,
         "orderbook": orderbook,
-        "daily_ohlcv": df_30d.tail(5).to_dict(),
-        "hourly_ohlcv": df_24h.tail(5).to_dict()
+        "daily_ohlcv": df_30d_tail.to_dict(),
+        "hourly_ohlcv": df_24h_tail.to_dict()
     }
-    reflection = generate_reflection(recent_trades, json.dumps(current_market_data))
+    reflection = generate_reflection(recent_trades, json.dumps(current_market_data, default=str))
 
     # DB 저장 (매매 실행 후, 잔고/가격 등과 함께 기록, reflection 포함)
     log_trade_postgres(
