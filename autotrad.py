@@ -482,6 +482,12 @@ def ai_trading():
                 "enum": ["buy", "sell", "hold"],
                 "description": "매매 결정 (buy, sell, hold 중 하나)"
             },
+            "percentage": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+                "description": "매매에 투입할 비중(%)"
+            },
             "reason": {
                 "type": "string",
                 "description": "매매 결정의 사유"
@@ -501,7 +507,7 @@ def ai_trading():
                 "description": "익절가 (없으면 null)"
             }
         },
-        "required": ["decision", "reason", "confidence", "stop_loss", "take_profit"],
+        "required": ["decision", "percentage", "reason", "confidence", "stop_loss", "take_profit"],
         "additionalProperties": False
     }
 
@@ -594,7 +600,7 @@ def ai_trading():
         return
 
     # 2. 필수 필드 체크
-    required_fields = ["decision", "reason", "confidence", "stop_loss", "take_profit"]
+    required_fields = ["decision", "percentage", "reason", "confidence", "stop_loss", "take_profit"]
     missing_fields = [f for f in required_fields if f not in gpt_result]
     if missing_fields:
         print(f"[오류] GPT 응답에 필수 필드가 누락됨: {missing_fields}")
