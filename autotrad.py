@@ -335,9 +335,9 @@ def init_postgres_table():
         port=os.getenv("PG_PORT", "5432")
     )
     cur = conn.cursor()
-    # trade_log 테이블이 없으면 생성
+    # eth_autotrad 테이블이 없으면 생성
     cur.execute('''
-        CREATE TABLE IF NOT EXISTS trade_log (
+        CREATE TABLE IF NOT EXISTS eth_autotrad (
             id SERIAL PRIMARY KEY,
             time TIMESTAMP NOT NULL,
             decision VARCHAR(10),
@@ -355,7 +355,7 @@ def init_postgres_table():
 
 def save_trade_to_postgres(time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price):
     """
-    매매 데이터를 PostgreSQL의 trade_log 테이블에 저장하는 함수
+    매매 데이터를 PostgreSQL의 eth_autotrad 테이블에 저장하는 함수
     """
     # DB 연결
     conn = psycopg2.connect(
@@ -368,7 +368,7 @@ def save_trade_to_postgres(time, decision, percentage, reason, eth_balance, krw_
     cur = conn.cursor()
     # 데이터 insert
     cur.execute('''
-        INSERT INTO trade_log (time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price)
+        INSERT INTO eth_autotrad (time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     ''', (time, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price))
     conn.commit()
