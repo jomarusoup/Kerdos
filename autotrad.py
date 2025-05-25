@@ -310,7 +310,7 @@ def get_latest_chart_image_base64(capture_dir="/home/kerdos/gptbitcoin/capture")
 #========================================================
 def get_combined_transcript(video_id):
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, language=['ko'])
         combined_text = ' '.join(entry['text'] for entry in transcript)
         return combined_text
     except Exception as e:
@@ -432,7 +432,7 @@ def ai_trading():
     #====================================================================
     # 3-4. 유튜브 자막 데이터 추출
     #====================================================================
-    youtube_video_id = os.getenv("YOUTUBE_VIDEO_ID", "TWINrTppUl4")  # 기본값 예시
+    youtube_video_id = os.getenv("YOUTUBE_VIDEO_ID", "3XbtEX3jUv4")  # 기본값 예시
     youtube_transcript = get_combined_transcript(youtube_video_id)
 
     #====================================================================
@@ -446,11 +446,14 @@ def ai_trading():
         "- 1-hour OHLCV chart for ETH\n"
         "- Current ETH orderbook snapshot\n"
         "- Account balances (e.g., KRW, ETH)\n"
-        "- Fear & Greed Index { \"value\": int, \"classification\": string }\n"
+        "- Fear & Greed Index { 'value': int, 'classification': string }\n"
         "- Latest Ethereum-related news headlines (list of title, snippet, source, date)\n"
         "- Estimated trading fees (in %) and maximum risk per trade (in % of account)\n"
         "- Chart image analysis (summary from OpenAI Vision API)\n"
-        "- Recent YouTube transcript (investment-related)\n"
+        "- Recent YouTube transcript (investment-related, in Korean)\n"
+        "\n"
+        "IMPORTANT: The YouTube transcript provided below contains the trading method of '워뇨띠', a legendary Korean investor. You MUST always refer to the full transcript (in Korean) and incorporate Wonyotti's trading principles into your analysis and decision-making. If there is any conflict between technical indicators and Wonyotti's method, explain your reasoning clearly.\n"
+        "\n"
         "Your task:\n"
         "1. Analyze technical indicators (e.g., MACD, RSI, Bollinger Bands) on both timeframes.\n"
         "2. Incorporate Fear & Greed Index as an additional risk-sentiment signal:\n"
@@ -458,15 +461,19 @@ def ai_trading():
         "   - Extreme Greed → consider profit-taking or avoid new longs\n"
         "3. Consider the latest news headlines for any major events or sentiment that could affect ETH price (e.g., regulations, hacks, ETF news, etc).\n"
         "   - If no news is provided, ignore this factor and focus on other data.\n"
-        "4. Calculate an optimal position size based on maximum risk per trade, and output the percentage (%) of available KRW to buy (if decision is 'buy'), or percentage (%) of available ETH to sell (if decision is 'sell'), as 'percentage'. For 'hold', set percentage to 0.\n"
-        "5. Recommend stop-loss and take-profit levels if appropriate.\n"
-        "6. Decide whether to BUY, SELL, or HOLD ETH at market.\n"
-        "7. Assign a confidence score between 0.0 and 1.0.\n\n"
+        "4. You MUST always refer to the provided YouTube transcript (Wonyotti's trading method, in Korean) and incorporate its principles into your analysis and trading decision. If there is any conflict between technical indicators and Wonyotti's method, explain your reasoning clearly.\n"
+        "5. Calculate an optimal position size based on maximum risk per trade, and output the percentage (%) of available KRW to buy (if decision is 'buy'), or percentage (%) of available ETH to sell (if decision is 'sell'), as 'percentage'. For 'hold', set percentage to 0.\n"
+        "6. Recommend stop-loss and take-profit levels if appropriate.\n"
+        "7. Decide whether to BUY, SELL, or HOLD ETH at market.\n"
+        "8. Assign a confidence score between 0.0 and 1.0.\n"
+        "\n"
         "Respond in JSON format. The JSON must include: decision, percentage, reason, confidence, stop_loss, take_profit.\n"
         "Example:\n"
-        '{"decision":"buy","percentage":50,"reason":"기술적 분석 결과 매수 신호가 강함 (보유 KRW의 50% 매수)","confidence":0.85,"stop_loss":3200000,"take_profit":3600000}"\n'
-        '{"decision":"sell","percentage":100,"reason":"과매수 구간 진입 및 악재 뉴스 (보유 ETH의 100% 매도)","confidence":0.9,"stop_loss":null,"take_profit":null}"\n'
-        '{"decision":"hold","percentage":0,"reason":"명확한 신호 없음 (매매 없음)","confidence":0.6,"stop_loss":null,"take_profit":null}"'
+        '{"decision":"buy","percentage":50,"reason":"기술적 분석 결과 및 워뇨띠 매매법에 따라 매수 신호가 강함 (보유 KRW의 50% 매수)","confidence":0.85,"stop_loss":3200000,"take_profit":3600000}'\n'
+        '{"decision":"sell","percentage":100,"reason":"과매수 구간 진입 및 워뇨띠 매매법에 따라 매도 신호 (보유 ETH의 100% 매도)","confidence":0.9,"stop_loss":null,"take_profit":null}'\n'
+        '{"decision":"hold","percentage":0,"reason":"명확한 신호 없음 (매매 없음, 워뇨띠 매매법 참고)","confidence":0.6,"stop_loss":null,"take_profit":null}'\n'
+        "\n"
+        "Below is the full YouTube transcript (in Korean) of Wonyotti's trading method. Always refer to this in your analysis.\n"
     )
 
     #====================================================================
@@ -527,7 +534,7 @@ def ai_trading():
                             f"Hourly OHLCV with indicators (24 hours): {df_24h.to_json()}\n"
                             f"Recent news headlines: {json.dumps(eth_news_headlines)}\n"
                             f"Fear and Greed Index: {json.dumps(fng)}\n"
-                            f"Recent YouTube transcript (investment-related): {youtube_transcript[:1000]}..."
+                            f"Recent YouTube transcript (Wonyotti's trading method, in Korean):\n{youtube_transcript}"
                         )
                     },
                     {
