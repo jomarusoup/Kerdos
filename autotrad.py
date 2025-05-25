@@ -356,6 +356,11 @@ def log_trade_postgres(decision, percentage, reason, eth_balance, krw_balance, e
     """
     매매 기록을 eth_autotrad 테이블에 저장 (reflection 포함)
     """
+    # reflection 문자열에서 NUL(\x00) 문자 제거 및 타입 보장
+    if reflection is not None:
+        if not isinstance(reflection, str):
+            reflection = str(reflection)
+        reflection = reflection.replace('\x00', '')
     with psycopg2.connect(
         dbname=os.getenv("PG_DBNAME"),
         user=os.getenv("PG_USER"),
