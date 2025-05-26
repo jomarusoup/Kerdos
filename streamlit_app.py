@@ -5,11 +5,11 @@ import os
 from dotenv import load_dotenv
 from datetime import datetime
 
-# 10초(10000ms)마다 자동 새로고침
-st.experimental_rerun()  # 이건 무한루프가 되니 아래처럼 사용해야 함
+st.set_page_config(page_title="ETH Auto Trading Log", layout="wide")
 
 from streamlit_autorefresh import st_autorefresh
 
+# 10초(10000ms)마다 자동 새로고침
 st_autorefresh(interval=10 * 1000, key="datarefresh")
 
 # 환경변수 로드
@@ -32,7 +32,6 @@ def load_eth_auto_trad(limit=100):
             df = pd.DataFrame(rows, columns=columns)
     return df
 
-st.set_page_config(page_title="ETH Auto Trading Log", layout="wide")
 st.title("ETH Auto Trading Log")
 
 def format_expander_title(row):
