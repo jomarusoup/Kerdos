@@ -488,6 +488,7 @@ def ai_trading():
     orderbook_now     = None  # 실시간 오더북 정보(매도 시)
     current_price     = None  # 현재가(매도 시)
     total_value       = None  # ETH 총 평가금액(매도 시)
+
     #--- .env 파일에서 환경변수 로드
     load_dotenv()
     # Postgres 테이블 초기화(최초 1회만 실행, 반복 호출해도 무방)

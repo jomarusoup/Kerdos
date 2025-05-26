@@ -5,6 +5,13 @@ import os
 from dotenv import load_dotenv
 from datetime import datetime
 
+# 10초(10000ms)마다 자동 새로고침
+st.experimental_rerun()  # 이건 무한루프가 되니 아래처럼 사용해야 함
+
+from streamlit_autorefresh import st_autorefresh
+
+st_autorefresh(interval=10 * 1000, key="datarefresh")
+
 # 환경변수 로드
 def get_db_conn():
     load_dotenv()
