@@ -1,15 +1,25 @@
+# 기본 라이브러리
 import os
 import time
 import json
 import requests
-import pyupbit
+import logging
+from datetime import datetime, timedelta
+
+# 데이터 처리 관련
 import pandas as pd
 import ta
 import base64
 import io
 from PIL import Image
+
+# 환경 설정
 from dotenv import load_dotenv
+
+# OpenAI API
 from openai import OpenAI
+
+# 웹 스크래핑 관련
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -17,10 +27,33 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import logging
-from datetime import datetime, timedelta
+
+# 유튜브 관련
 from youtube_transcript_api import YouTubeTranscriptApi
+
+# 데이터베이스 관련
 import psycopg2
+
+# 암호화폐 거래 관련
+import pyupbit
+
+# 코어 모듈 import
+from core.indicators import add_indicators
+from core.external import (
+    get_fear_greed_index,
+    get_latest_eth_news_headlines,
+    capture_full_page_screenshot_and_save_and_encode,
+    get_combined_transcript,
+    get_latest_chart_image_base64
+)
+from core.db import (
+    init_postgres_table,
+    log_trade_postgres,
+    get_recent_trades_postgres,
+    calculate_performance,
+    update_last_trade_reflection
+)
+from core.reflection import generate_reflection
 
 ########################################################
 # 1) 보조지표 계산 함수
@@ -318,9 +351,11 @@ def get_combined_transcript(video_id):
         print(f"[YouTube] 자막 추출 실패: {e}")
         return ""
 
-#========================================================
-# 2-5) Postgres 테이블 초기화 함수
-#========================================================
+########################################################
+# 3) Postgres 관련 함수
+########################################################
+
+#--- Postgres 테이블 초기화 함수
 def init_postgres_table():
     """
     Create eth_auto_trad table with reflection column if it does not exist.
@@ -349,9 +384,7 @@ def init_postgres_table():
             ''')
             conn.commit()
 
-#========================================================
-# 2-6) Postgres 매매 기록 저장 함수
-#========================================================
+#--- Postgres 매매 기록 저장 함수
 def log_trade_postgres(decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price, reflection=None):
     """
     매매 기록을 eth_autotrad 테이블에 저장 (reflection 포함)
@@ -384,9 +417,7 @@ def log_trade_postgres(decision, percentage, reason, eth_balance, krw_balance, e
                 ''', (now, decision, percentage, reason, eth_balance, krw_balance, eth_avg_buy_price, eth_krw_price))
             conn.commit()
 
-#========================================================
-# 2-7) Postgres 최근 매매 내역 조회 함수
-#========================================================
+#--- Postgres 최근 매매 내역 조회 함수
 def get_recent_trades_postgres(days=7):
     """
     최근 days일간의 매매 내역을 DataFrame으로 반환 (최신순)
@@ -406,9 +437,7 @@ def get_recent_trades_postgres(days=7):
             df = pd.DataFrame(rows, columns=columns)
     return df
 
-#========================================================
-# 2-8) 매매 성과 계산 함수
-#========================================================
+#--- 매매 성과 계산 함수
 def calculate_performance(trades_df):
     if trades_df.empty:
         return 0
@@ -416,54 +445,8 @@ def calculate_performance(trades_df):
     final_balance = trades_df.iloc[0]['krw_balance'] + trades_df.iloc[0]['eth_balance'] * trades_df.iloc[0]['eth_krw_price']
     return (final_balance - initial_balance) / initial_balance * 100
 
-#========================================================
-# 2-9) 매매 반영 함수
-#========================================================
-def generate_reflection(trades_df, current_market_data):
-    performance = calculate_performance(trades_df)
-    last_reflection = trades_df.iloc[0]['reflection'] if not trades_df.empty and 'reflection' in trades_df.columns and trades_df.iloc[0]['reflection'] else ""
-    client = OpenAI()
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are an autonomous crypto trading AI that learns from its own mistakes and successes. "
-                    "Your goal is to become a better trader by reflecting on your recent trades, market conditions, and your previous self-reflection. "
-                    "Be honest and critical. Focus on actionable lessons and practical improvements."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"""
-Recent trading data:
-{trades_df.to_json(orient='records')}
-
-Current market data:
-{current_market_data}
-
-Overall performance in the last 7 days: {performance:.2f}%
-
-Previous reflection:
-{last_reflection}
-
-Please analyze this data and provide a structured reflection with the following sections:
-1. **Reflection:** Briefly summarize your overall trading performance and decision quality.
-2. **What worked well:** List specific strategies or decisions that were effective.
-3. **What didn't work:** Identify mistakes, missed opportunities, or poor decisions.
-4. **Actionable improvement:** Clearly state what you will do differently in your next trades.
-5. **Market pattern/trend:** Note any patterns or trends you observe in the market data.
-
-Be concise and practical. Limit your response to 200 words or less.
-"""
-            }
-        ]
-    )
-    return response.choices[0].message.content
-
 ########################################################
-# 3) 메인 자동매매 함수
+# 5) 메인 자동매매 함수
 ########################################################
 def ai_trading():
     #--- 변수 초기화
@@ -585,10 +568,14 @@ def ai_trading():
     #====================================================================
     # 4. ChatGPT에게 전달할 데이터 준비 (JSON)
     #====================================================================
-    # 시스템 프롬프트 설정
+    # 최근 reflection 불러오기
+    recent_trades = get_recent_trades_postgres(days=7)
+    last_reflection = recent_trades.iloc[0]['reflection'] if not recent_trades.empty and 'reflection' in recent_trades.columns and recent_trades.iloc[0]['reflection'] else ""
+
+    # 프롬프트에 추가 (reflection은 system_prompt에서 제거)
     system_prompt = (
         "You are an Ethereum trading expert with deep experience in technical analysis, on-chain metrics, and market sentiment.\n"
-        "You will receive the following data encoded in JSON:\n"
+        "You will receive the following data encoded in JSON or as text fields.\n"
         "- 30-day OHLCV chart for ETH (Open, High, Low, Close, Volume)\n"
         "- 1-hour OHLCV chart for ETH\n"
         "- Current ETH orderbook snapshot\n"
@@ -598,6 +585,7 @@ def ai_trading():
         "- Estimated trading fees (in %) and maximum risk per trade (in % of account)\n"
         "- Chart image analysis (summary from OpenAI Vision API)\n"
         "- Recent YouTube transcript (investment-related, in Korean)\n"
+        "- Recent self-reflection (your own trading review and improvement plan)\n"
         "\n"
         "IMPORTANT: The YouTube transcript provided below contains the trading method of '워뇨띠', a legendary Korean investor. You MUST always refer to the full transcript (in Korean) and incorporate Wonyotti's trading principles into your analysis and decision-making. If there is any conflict between technical indicators and Wonyotti's method, explain your reasoning clearly.\n"
         "\n"
@@ -619,8 +607,6 @@ def ai_trading():
         '{"decision":"buy","percentage":50,"reason":"기술적 분석 결과 및 워뇨띠 매매법에 따라 매수 신호가 강함 (보유 KRW의 50% 매수)","confidence":0.85,"stop_loss":3200000,"take_profit":3600000}' "\n"
         '{"decision":"sell","percentage":100,"reason":"과매수 구간 진입 및 워뇨띠 매매법에 따라 매도 신호 (보유 ETH의 100% 매도)","confidence":0.9,"stop_loss":null,"take_profit":null}' "\n"
         '{"decision":"hold","percentage":0,"reason":"명확한 신호 없음 (매매 없음, 워뇨띠 매매법 참고)","confidence":0.6,"stop_loss":null,"take_profit":null}' "\n"
-        "\n"
-        "Below is the full YouTube transcript (in Korean) of Wonyotti's trading method. Always refer to this in your analysis.\n"
     )
 
     #====================================================================
@@ -681,7 +667,8 @@ def ai_trading():
                             f"Hourly OHLCV with indicators (24 hours): {df_24h.to_json()}\n"
                             f"Recent news headlines: {json.dumps(eth_news_headlines)}\n"
                             f"Fear and Greed Index: {json.dumps(fng)}\n"
-                            f"Recent YouTube transcript (Wonyotti's trading method, in Korean):\n{youtube_transcript}"
+                            f"Recent YouTube transcript (Wonyotti's trading method, in Korean):\n{youtube_transcript}\n"
+                            f"Recent self-reflection: {last_reflection}"
                         )
                     },
                     {
@@ -836,6 +823,7 @@ def ai_trading():
     reflection = generate_reflection(recent_trades, json.dumps(current_market_data, default=str))
 
     # DB 저장 (매매 실행 후, 잔고/가격 등과 함께 기록, reflection 포함)
+    # 1. reflection 없이 매매 기록 저장
     log_trade_postgres(
         decision,
         percentage,
@@ -843,12 +831,13 @@ def ai_trading():
         my_eth,      # eth_balance
         my_krw,      # krw_balance
         eth_avg_buy_price,
-        eth_krw_price,
-        reflection
+        eth_krw_price
     )
+    # 2. reflection 생성 후, 직전 매매 레코드에 reflection만 업데이트
+    update_last_trade_reflection(reflection)
 
 ########################################################
-# 4) 주기 실행
+# 6) 주기 실행
 ########################################################
 if __name__ == "__main__":
     while True:

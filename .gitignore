@@ -1,4 +1,5 @@
-/bak/
+bak/
 .env
 *.swp
 DOC/.gitkeep
+capture/*.png
