@@ -842,4 +842,4 @@ def ai_trading():
 if __name__ == "__main__":
     while True:
         ai_trading()
-        time.sleep(60)  # 1분 간격
+        time.sleep(3600)  # 1시간 간격
