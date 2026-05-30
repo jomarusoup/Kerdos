@@ -24,8 +24,6 @@ LMM Large Multimodel Models
 	- 추가 기능
 		- 엔벨로프 /
 
-<img width="934" alt="Screenshot 2025-01-25 at 13 35 10" src="https://github.com/user-attachments/assets/3397ba17-1e49-4b3d-a569-a60225608cc4" />
-
 ### 서버
 
 - OS: Rocky Linux 8.10 (Green Obsidian)
