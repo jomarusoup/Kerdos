@@ -6,6 +6,11 @@ import requests
 import logging
 from datetime import datetime, timedelta
 
+# 업비트 시장가 수수료 (Taker fee 0.05%)
+# 매수+매도 왕복 시 총 0.10% 손실 → 손익분기점: 매수가 * 1.001 이상 상승해야 수익
+UPBIT_FEE_RATE     = 0.0005
+UPBIT_MIN_ORDER_KRW = 5000
+
 # 데이터 처리 관련
 import pandas as pd
 import ta
@@ -572,6 +577,18 @@ def ai_trading():
     recent_trades = get_recent_trades_postgres(days=7)
     last_reflection = recent_trades.iloc[0]['reflection'] if not recent_trades.empty and 'reflection' in recent_trades.columns and recent_trades.iloc[0]['reflection'] else ""
 
+    # 수수료 기반 손익분기점 계산
+    eth_avg_buy_price_for_fee = None
+    for item in all_balance:
+        if item['currency'] == 'ETH':
+            eth_avg_buy_price_for_fee = float(item.get('avg_buy_price', 0))
+            break
+    break_even_price = (
+        round(eth_avg_buy_price_for_fee * (1 + 2 * UPBIT_FEE_RATE), 0)
+        if eth_avg_buy_price_for_fee and eth_avg_buy_price_for_fee > 0
+        else None
+    )
+
     # 프롬프트에 추가 (reflection은 system_prompt에서 제거)
     system_prompt = (
         "You are an Ethereum trading expert with deep experience in technical analysis, on-chain metrics, and market sentiment.\n"
@@ -582,7 +599,7 @@ def ai_trading():
         "- Account balances (e.g., KRW, ETH)\n"
         "- Fear & Greed Index { 'value': int, 'classification': string }\n"
         "- Latest Ethereum-related news headlines (list of title, snippet, source, date)\n"
-        "- Estimated trading fees (in %) and maximum risk per trade (in % of account)\n"
+        "- Trading fee rate and break-even threshold\n"
         "- Chart image analysis (summary from OpenAI Vision API)\n"
         "- Recent YouTube transcript (investment-related, in Korean)\n"
         "- Recent self-reflection (your own trading review and improvement plan)\n"
@@ -600,6 +617,13 @@ def ai_trading():
         "5. Calculate an optimal position size based on maximum risk per trade, and output the percentage (%) of available KRW to buy (if decision is 'buy'), or percentage (%) of available ETH to sell (if decision is 'sell'), as 'percentage'. For 'hold', set percentage to 0.\n"
         "6. Recommend stop-loss and take-profit levels if appropriate.\n"
         "7. Decide whether to BUY, SELL, or HOLD ETH at market.\n"
+        "   IMPORTANT — Fee-aware trading rule:\n"
+        "   - Upbit charges 0.05% per trade (buy AND sell separately).\n"
+        "   - Round-trip cost: 0.10% of the traded amount.\n"
+        "   - Break-even: ETH price must rise MORE than 0.10% from your buy price before selling is profitable.\n"
+        "   - DO NOT recommend buy/sell when the expected price move is smaller than the break-even threshold.\n"
+        "   - When deciding to sell, verify that (current_price - avg_buy_price) / avg_buy_price > 0.001 (0.10%) before recommending sell.\n"
+        "   - Frequent small-profit trades will result in net losses due to fees — prefer holding over churning.\n"
         "8. Assign a confidence score between 0.0 and 1.0.\n"
         "\n"
         "Respond in JSON format. The JSON must include: decision, percentage, reason, confidence, stop_loss, take_profit.\n"
@@ -667,6 +691,9 @@ def ai_trading():
                             f"Hourly OHLCV with indicators (24 hours): {df_24h.to_json()}\n"
                             f"Recent news headlines: {json.dumps(eth_news_headlines)}\n"
                             f"Fear and Greed Index: {json.dumps(fng)}\n"
+                            f"Trading fee rate: {UPBIT_FEE_RATE * 100:.2f}% per trade (buy and sell each)\n"
+                            f"Round-trip fee cost: {UPBIT_FEE_RATE * 2 * 100:.2f}% (buy + sell combined)\n"
+                            f"Break-even sell price (to cover round-trip fees): {break_even_price if break_even_price else 'N/A (no ETH held)'} KRW\n"
                             f"Recent YouTube transcript (Wonyotti's trading method, in Korean):\n{youtube_transcript}\n"
                             f"Recent self-reflection: {last_reflection}"
                         )
@@ -765,16 +792,17 @@ def ai_trading():
     # 7. 매매 실행
     #====================================================================
     if decision == "buy":
-        if my_krw > 5000:
-            buy_amount = my_krw * (percentage / 100) * 0.9995  # 비율 반영 + 수수료 차감
-            if buy_amount > 5000:
-                print(f"=== Buy Order Executed: {buy_amount:.0f} KRW ===")
+        if my_krw > UPBIT_MIN_ORDER_KRW:
+            # 잔고 초과 주문 방지를 위해 수수료만큼 여유를 두고 주문
+            buy_amount = my_krw * (percentage / 100) * (1 - UPBIT_FEE_RATE)
+            if buy_amount > UPBIT_MIN_ORDER_KRW:
+                print(f"=== Buy Order Executed: {buy_amount:.0f} KRW (fee {UPBIT_FEE_RATE*100:.2f}% deducted) ===")
                 buy_result = upbit.buy_market_order("KRW-ETH", buy_amount)
                 print(buy_result)
             else:
-                print("매수 금액이 5000원 미만입니다.")
+                print(f"매수 금액이 {UPBIT_MIN_ORDER_KRW}원 미만입니다.")
         else:
-            print("KRW 잔액 부족 (5000원 이상 필요)")
+            print(f"KRW 잔액 부족 ({UPBIT_MIN_ORDER_KRW}원 이상 필요)")
 
     elif decision == "sell":
         my_eth = upbit.get_balance("KRW-ETH")
@@ -782,11 +810,13 @@ def ai_trading():
         orderbook = pyupbit.get_orderbook("KRW-ETH")
         if orderbook and isinstance(orderbook, dict) and 'orderbook_units' in orderbook:
             current_price = orderbook['orderbook_units'][0]['ask_price']
-            if sell_amount * current_price > 5000:
-                print(f"### Sell Order Executed: {percentage}% of held ETH ###")
+            # 수수료 차감 후 수령액이 최소 주문금액 이상인지 확인
+            net_sell_value = sell_amount * current_price * (1 - UPBIT_FEE_RATE)
+            if net_sell_value > UPBIT_MIN_ORDER_KRW:
+                print(f"### Sell Order Executed: {percentage}% of held ETH (net ~{net_sell_value:.0f} KRW after fee) ###")
                 print(upbit.sell_market_order("KRW-ETH", sell_amount))
             else:
-                print("### 매도 주문 실패: ETH 부족 (5000 KRW 미만) ###")
+                print(f"### 매도 주문 실패: 수수료 차감 후 수령액 {net_sell_value:.0f} KRW < {UPBIT_MIN_ORDER_KRW} KRW ###")
         else:
             print("오더북 데이터를 불러오지 못했습니다. 매매를 중단합니다.")
 
